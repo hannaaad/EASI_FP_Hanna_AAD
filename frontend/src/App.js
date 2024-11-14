@@ -1,25 +1,21 @@
-import logo from './logo.svg';
-import './App.css';
+// Example React fetch function to get sensor data
+import { useEffect, useState } from "react";
 
-function App() {
-  return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
-  );
+function useSensorData() {
+  const [sensorData, setSensorData] = useState(null);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      const response = await fetch("http://localhost:3000/api/sensors");
+      const data = await response.json();
+      setSensorData(data);
+    };
+
+    fetchData();
+
+    const interval = setInterval(fetchData, 10000); // Poll every 10 seconds
+    return () => clearInterval(interval); // Clean up on unmount
+  }, []);
+
+  return sensorData;
 }
-
-export default App;
