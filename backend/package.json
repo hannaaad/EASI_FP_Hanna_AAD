@@ -11,6 +11,9 @@
   "description": "",
   "dependencies": {
     "express": "^4.21.1",
-    "johnny-five": "^2.1.0"
+    "johnny-five": "^2.1.0",
+    "node-dht-sensor": "^0.4.3",
+    "pigpio": "^3.3.1",
+    "raspi-io": "^11.0.0"
   }
 }

@@ -1,64 +1,46 @@
 const express = require("express");
-const { Board, Sensor, Relay } = require("johnny-five");
-const board = new Board();
+const { Board, Relay } = require("johnny-five");
+const Raspi = require("raspi-io").RaspiIO;
+const dhtSensor = require("node-dht-sensor").promises;
+const Gpio = require("onoff").Gpio;
 
 const app = express();
 const PORT = 3000;
-
-// Thresholds and pin mappings
-const TEMPERATURE_THRESHOLD = 27;
-const TEMPERATURE_LOW_THRESHOLD = 21;
-const LIGHT_THRESHOLD = 5;
-let previousTemperature = 0;
 let fanState = false;
 let lightState = false;
+const TEMPERATURE_THRESHOLD = 25; // Example threshold for fan control
+const TEMPERATURE_LOW_THRESHOLD = 22; // Example threshold for fan off
+const LIGHT_THRESHOLD = 2; // Example threshold for light control
+
+const board = new Board({
+  io: new Raspi()
+});
 
 board.on("ready", () => {
-  // Define sensors and actuators (correct Raspberry Pi pins)
-  const temperatureSensor = new Sensor("A0"); // Temperature sensor connected to pin A0
-  const lightSensor = new Sensor("A2"); // Light sensor connected to pin A2
-  const flameSensor = new Sensor("A1"); // Flame sensor connected to pin A1
-  const fanRelay = new Relay(7); // Fan connected to pin 7 (Relay pin)
-  const lightRelay = new Relay(3); // Light connected to pin 3 (Relay pin)
-  const pumpRelay = new Relay(11); // Pump connected to pin 11 (Relay pin)
+  const fanRelay = new Gpio(9, 'out');
+  const lightRelay = new Gpio(3, 'out');
+  const pumpRelay = new Gpio(11, 'out');
 
   console.log("System Ready.");
 
-  // Functions for handling each action
-  function readTemperature() {
-    const temperature = temperatureSensor.value; // Mock value, scale it based on sensor data
-    console.log(`Temperature: ${temperature} °C`);
-    return temperature;
-  }
-
-  function readHumidity() {
-    // Replace with your humidity sensor reading logic if available
-    return 50; // Mock humidity value
-  }
-
-  function readLight() {
-    const lightValue = lightSensor.value;
-    console.log(`Light value: ${lightValue}`);
-    return lightValue;
-  }
-
-  function checkFlame() {
-    const flameValue = flameSensor.value;
-    if (flameValue < LIGHT_THRESHOLD) {
-      console.log("Flame detected!");
-      pumpRelay.on();
-      setTimeout(() => pumpRelay.off(), 2000);
+  async function readTemperatureHumidity() {
+    try {
+      const { temperature, humidity } = await dhtSensor.read(12, 4);
+      console.log(`Temperature: ${temperature} °C, Humidity: ${humidity} %`);
+      return { temperature, humidity };
+    } catch (error) {
+      console.error("Failed to read from DHT sensor:", error);
+      return { temperature: null, humidity: null };
     }
-    return flameValue;
   }
 
   function controlFan(temperature) {
     if (temperature >= TEMPERATURE_THRESHOLD && !fanState) {
-      fanRelay.on();
+      fanRelay.writeSync(1);
       fanState = true;
       console.log("Fan ON");
     } else if (temperature <= TEMPERATURE_LOW_THRESHOLD && fanState) {
-      fanRelay.off();
+      fanRelay.writeSync(0);
       fanState = false;
       console.log("Fan OFF");
     }
@@ -66,40 +48,36 @@ board.on("ready", () => {
 
   function controlLight(lightValue) {
     if (lightValue < LIGHT_THRESHOLD && !lightState) {
-      lightRelay.on();
+      lightRelay.writeSync(1);
       lightState = true;
       console.log("Light ON");
     } else if (lightValue >= LIGHT_THRESHOLD && lightState) {
-      lightRelay.off();
+      lightRelay.writeSync(0);
       lightState = false;
       console.log("Light OFF");
     }
   }
 
-  // API Routes
-  app.get("/api/sensors", (req, res) => {
-    const temperature = readTemperature();
-    const humidity = readHumidity();
-    const light = readLight();
-    const flame = checkFlame();
+  app.get("/api/sensors", async (req, res) => {
+    const { temperature, humidity } = await readTemperatureHumidity();
 
-    // Control actuators based on sensor readings
-    controlFan(temperature);
-    controlLight(light);
+    if (temperature !== null) {
+      controlFan(temperature);
+    }
 
-    // Send sensor data to the client
+    const lightValue = 3; // Placeholder value for light
+    controlLight(lightValue);
+
     res.json({
       temperature,
       humidity,
-      light,
-      flame,
+      lightValue,
       fanState,
       lightState
     });
   });
 });
 
-// Start the server
 app.listen(PORT, () => {
   console.log(`API server running on http://localhost:${PORT}`);
 });

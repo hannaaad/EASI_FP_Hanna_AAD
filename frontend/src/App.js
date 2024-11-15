@@ -1,21 +1,27 @@
-// Example React fetch function to get sensor data
-import { useEffect, useState } from "react";
+// client/src/App.js
+import React from "react";
+import useSensorData from "./useSensorData";
 
-function useSensorData() {
-  const [sensorData, setSensorData] = useState(null);
+function App() {
+  const sensorData = useSensorData();
 
-  useEffect(() => {
-    const fetchData = async () => {
-      const response = await fetch("http://localhost:3000/api/sensors");
-      const data = await response.json();
-      setSensorData(data);
-    };
-
-    fetchData();
-
-    const interval = setInterval(fetchData, 10000); // Poll every 10 seconds
-    return () => clearInterval(interval); // Clean up on unmount
-  }, []);
-
-  return sensorData;
+  return (
+    <div>
+      <h1>Sensor Data</h1>
+      {sensorData ? (
+        <div>
+          <p>Temperature: {sensorData.temperature} °C</p>
+          <p>Humidity: {sensorData.humidity} %</p>
+          <p>Light: {sensorData.light}</p>
+          <p>Flame: {sensorData.flame ? "Detected" : "Not detected"}</p>
+          <p>Fan State: {sensorData.fanState ? "On" : "Off"}</p>
+          <p>Light State: {sensorData.lightState ? "On" : "Off"}</p>
+        </div>
+      ) : (
+        <p>Loading...</p>
+      )}
+    </div>
+  );
 }
+
+export default App;
