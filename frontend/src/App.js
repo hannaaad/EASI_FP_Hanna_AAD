@@ -1,12 +1,15 @@
 // client/src/App.js
-import React from "react";
-import useSensorData from "./useSensorData";
+import React from 'react';
+import useSensorData from './useSensorData';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import Homepage from './public/HomePage';
 
-function App() {
-  const sensorData = useSensorData();
-
+function App() {const sensorData = useSensorData();
   return (
-    <div>
+    <Router>
+      <Routes>
+        <Route path="/" element={<Homepage />} />
+        {<div>
       <h1>Sensor Data</h1>
       {sensorData ? (
         <div>
@@ -20,8 +23,8 @@ function App() {
       ) : (
         <p>Loading...</p>
       )}
-    </div>
+    </div>/* Other routes */}
+      </Routes>
+    </Router>
   );
 }
-
-export default App;

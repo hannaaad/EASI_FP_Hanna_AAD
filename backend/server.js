@@ -7,6 +7,8 @@ const Gpio = require("onoff").Gpio;
 const app = express();
 const PORT = 3000;
 
+app.use(express.json()); // Middleware to parse JSON request bodies
+
 let fanState = false;
 let lightState = false;
 let pumpState = false;
@@ -19,12 +21,11 @@ const board = new Board({
 });
 
 board.on("ready", () => {
-  const ledLight = new Gpio(3, 'out');
-  const fan = new Gpio(9, 'out'); // L293D driver for fan
-  const pump = new Gpio(11, 'out'); // L293D driver for pump
-  const lightDetector = new Gpio(27, 'in', 'both'); // GPIO 27 for Light Detection
-  const irFlameSensor = new Gpio(17, 'in', 'both'); // Corrected GPIO for IR Flame Sensor
-
+  const ledLight = new Gpio(3, "out");
+  const fan = new Gpio(9, "out"); // L293D driver for fan
+  const pump = new Gpio(11, "out"); // L293D driver for pump
+  const lightDetector = new Gpio(27, "in", "both"); // GPIO 27 for Light Detection
+  const irFlameSensor = new Gpio(17, "in", "both"); // IR Flame Sensor
 
   console.log("System Ready.");
 
@@ -39,40 +40,22 @@ board.on("ready", () => {
     }
   }
 
-  function controlFan(temperature) {
-    if (temperature >= TEMPERATURE_THRESHOLD && !fanState) {
-      fan.writeSync(1);
-      fanState = true;
-      console.log("Fan ON");
-    } else if (temperature <= TEMPERATURE_LOW_THRESHOLD && fanState) {
-      fan.writeSync(0);
-      fanState = false;
-      console.log("Fan OFF");
-    }
+  function controlFan(state) {
+    fan.writeSync(state ? 1 : 0);
+    fanState = state;
+    console.log(`Fan ${state ? "ON" : "OFF"}`);
   }
 
-  function controlLight(lightValue) {
-    if (lightValue < LIGHT_THRESHOLD && !lightState) {
-      ledLight.writeSync(1);
-      lightState = true;
-      console.log("Light ON");
-    } else if (lightValue >= LIGHT_THRESHOLD && lightState) {
-      ledLight.writeSync(0);
-      lightState = false;
-      console.log("Light OFF");
-    }
+  function controlLight(state) {
+    ledLight.writeSync(state ? 1 : 0);
+    lightState = state;
+    console.log(`Light ${state ? "ON" : "OFF"}`);
   }
 
-  function controlPump() {
-    if (!pumpState) {
-      pump.writeSync(1);
-      pumpState = true;
-      console.log("Pump ON");
-    } else {
-      pump.writeSync(0);
-      pumpState = false;
-      console.log("Pump OFF");
-    }
+  function controlPump(state) {
+    pump.writeSync(state ? 1 : 0);
+    pumpState = state;
+    console.log(`Pump ${state ? "ON" : "OFF"}`);
   }
 
   irFlameSensor.watch((err, value) => {
@@ -83,12 +66,12 @@ board.on("ready", () => {
     console.log(value ? "No Flame Detected" : "Flame Detected");
   });
 
+  // --- API ROUTES ---
+
+  // GET: Retrieve sensor states and readings
   app.get("/api/sensors", async (req, res) => {
     const { temperature, humidity } = await readTemperatureHumidity();
     const lightValue = 3; // Placeholder for light detection
-
-    if (temperature !== null) controlFan(temperature);
-    controlLight(lightValue);
 
     res.json({
       temperature,
@@ -99,8 +82,59 @@ board.on("ready", () => {
       pumpState
     });
   });
+
+  // POST: Control pump manually
+  app.post("/api/pump", (req, res) => {
+    const { state } = req.body;
+    controlPump(state);
+    res.json({ pumpState });
+  });
+
+  // PUT: Set fan and light states
+  app.put("/api/devices", (req, res) => {
+    const { fan, light } = req.body;
+
+    if (fan !== undefined) controlFan(fan);
+    if (light !== undefined) controlLight(light);
+
+    res.json({ fanState, lightState });
+  });
+
+  // PATCH: Adjust fan or light state (toggle-like behavior)
+  app.patch("/api/devices/:device", (req, res) => {
+    const { device } = req.params;
+
+    if (device === "fan") {
+      fanState = !fanState;
+      controlFan(fanState);
+      res.json({ fanState });
+    } else if (device === "light") {
+      lightState = !lightState;
+      controlLight(lightState);
+      res.json({ lightState });
+    } else {
+      res.status(400).json({ error: "Invalid device" });
+    }
+  });
+
+  // DELETE: Reset all devices to off state
+  app.delete("/api/devices", (req, res) => {
+    controlFan(false);
+    controlLight(false);
+    controlPump(false);
+
+    res.json({
+      message: "All devices reset to off state",
+      fanState,
+      lightState,
+      pumpState
+    });
+  });
+
+  // --- END OF API ROUTES ---
 });
 
+// Start server
 app.listen(PORT, () => {
   console.log(`API server running on http://localhost:${PORT}`);
 });
