@@ -3,7 +3,7 @@ const { Board } = require("johnny-five");
 const Raspi = require("raspi-io").RaspiIO;
 const dhtSensor = require("node-dht-sensor").promises;
 const Gpio = require("onoff").Gpio;
-
+// taksim?
 const app = express();
 const PORT = 3000;
 
