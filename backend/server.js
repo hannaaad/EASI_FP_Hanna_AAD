@@ -1,109 +1,140 @@
 const express = require("express");
-//const dhtSensor = require("node-dht-sensor").promises;
-//const { GpioChip } = require('gpiod');
+const { Board } = require("johnny-five");
+const Raspi = require("raspi-io").RaspiIO;
+const dhtSensor = require("node-dht-sensor").promises;
+const Gpio = require("onoff").Gpio;
 
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+app.use(express.json()); // Middleware to parse JSON request bodies
 
 let fanState = false;
 let lightState = false;
 let pumpState = false;
 const TEMPERATURE_THRESHOLD = 25;
 const TEMPERATURE_LOW_THRESHOLD = 22;
+const LIGHT_THRESHOLD = 2;
 
-// const gpioChip = new GpioChip("gpiochip512");
-// const fan = gpioChip.getLine(0); // Update with the correct line
-// const ledLight = gpioChip.getLine(1); // Update with the correct line
-// const pump = gpioChip.getLine(2); // Update with the correct line
-// const lightDetector = gpioChip.getLine(3); // Update with the correct line
-// const irFlameSensor = gpioChip.getLine(4); // Update with the correct line
-
-// function requestOutputs() {
-//   fan.requestOutputMode();
-//   ledLight.requestOutputMode();
-//   pump.requestOutputMode();
-// }
-
-// function controlDevice(device, state) {
-//   device.setValue(state ? 1 : 0);
-// }
-
-// async function readTemperatureHumidity() {
-//   try {
-//     const { temperature, humidity } = await dhtSensor.read(11, 4);
-//     return { temperature, humidity };
-//   } catch (error) {
-//     console.error("Failed to read temperature and humidity:", error);
-//     return { temperature: null, humidity: null };
-//   }
-// }
-
-// function validateDeviceState(req, res, next) {
-//   const { state } = req.body;
-//   if (typeof state !== "boolean") {
-//     return res.status(400).json({ error: "State must be a boolean" });
-//   }
-//   next();
-// }
-app.get("/", async (req, res) => {
-  return res.json({ data:"raspi api working" });
+const board = new Board({
+  io: new Raspi()
 });
 
-// app.get("/api/sensors", async (req, res) => {
-//   const { temperature, humidity } = await readTemperatureHumidity();
-//   const lightValue = lightDetector.getValueSync(); // Replace with line read logic
-//   res.json({ temperature, humidity, lightValue, fanState, lightState, pumpState });
-// });
+board.on("ready", () => {
+  const ledLight = new Gpio(3, "out");
+  const fan = new Gpio(9, "out"); // L293D driver for fan
+  const pump = new Gpio(11, "out"); // L293D driver for pump
+  const lightDetector = new Gpio(27, "in", "both"); // GPIO 27 for Light Detection
+  const irFlameSensor = new Gpio(17, "in", "both"); // IR Flame Sensor
 
-// app.post("/api/pump", validateDeviceState, (req, res) => {
-//   const { state } = req.body;
-//   controlDevice(pump, state);
-//   pumpState = state;
-//   res.json({ pumpState });
-// });
+  console.log("System Ready.");
 
-// app.put("/api/devices", (req, res) => {
-//   const { fan, light } = req.body;
-//   if (fan !== undefined) {
-//     controlDevice(fan, fan);
-//     fanState = fan;
-//   }
-//   if (light !== undefined) {
-//     controlDevice(ledLight, light);
-//     lightState = light;
-//   }
-//   res.json({ fanState, lightState });
-// });
+  async function readTemperatureHumidity() {
+    try {
+      const { temperature, humidity } = await dhtSensor.read(11, 4);
+      console.log(`Temperature: ${temperature} °C, Humidity: ${humidity} %`);
+      return { temperature, humidity };
+    } catch (error) {
+      console.error("Failed to read from DHT sensor:", error);
+      return { temperature: null, humidity: null };
+    }
+  }
 
-// app.patch("/api/devices/:device", (req, res) => {
-//   const { device } = req.params;
+  function controlFan(state) {
+    fan.writeSync(state ? 1 : 0);
+    fanState = state;
+    console.log(`Fan ${state ? "ON" : "OFF"}`);
+  }
 
-//   if (device === "fan") {
-//     fanState = !fanState;
-//     controlDevice(fan, fanState);
-//     res.json({ fanState });
-//   } else if (device === "light") {
-//     lightState = !lightState;
-//     controlDevice(ledLight, lightState);
-//     res.json({ lightState });
-//   } else {
-//     res.status(400).json({ error: "Invalid device" });
-//   }
-// });
+  function controlLight(state) {
+    ledLight.writeSync(state ? 1 : 0);
+    lightState = state;
+    console.log(`Light ${state ? "ON" : "OFF"}`);
+  }
 
-// app.delete("/api/devices", (req, res) => {
-//   controlDevice(fan, false);
-//   controlDevice(ledLight, false);
-//   controlDevice(pump, false);
-//   fanState = false;
-//   lightState = false;
-//   pumpState = false;
-//   res.json({ message: "All devices reset to off state", fanState, lightState, pumpState });
-// });
+  function controlPump(state) {
+    pump.writeSync(state ? 1 : 0);
+    pumpState = state;
+    console.log(`Pump ${state ? "ON" : "OFF"}`);
+  }
 
+  irFlameSensor.watch((err, value) => {
+    if (err) {
+      console.error("Error reading IR Flame Sensor:", err);
+      return;
+    }
+    console.log(value ? "No Flame Detected" : "Flame Detected");
+  });
+
+  // --- API ROUTES ---
+
+  // GET: Retrieve sensor states and readings
+  app.get("/api/sensors", async (req, res) => {
+    const { temperature, humidity } = await readTemperatureHumidity();
+    const lightValue = 3; // Placeholder for light detection
+
+    res.json({
+      temperature,
+      humidity,
+      lightValue,
+      fanState,
+      lightState,
+      pumpState
+    });
+  });
+
+  // POST: Control pump manually
+  app.post("/api/pump", (req, res) => {
+    const { state } = req.body;
+    controlPump(state);
+    res.json({ pumpState });
+  });
+
+  // PUT: Set fan and light states
+  app.put("/api/devices", (req, res) => {
+    const { fan, light } = req.body;
+
+    if (fan !== undefined) controlFan(fan);
+    if (light !== undefined) controlLight(light);
+
+    res.json({ fanState, lightState });
+  });
+
+  // PATCH: Adjust fan or light state (toggle-like behavior)
+  app.patch("/api/devices/:device", (req, res) => {
+    const { device } = req.params;
+
+    if (device === "fan") {
+      fanState = !fanState;
+      controlFan(fanState);
+      res.json({ fanState });
+    } else if (device === "light") {
+      lightState = !lightState;
+      controlLight(lightState);
+      res.json({ lightState });
+    } else {
+      res.status(400).json({ error: "Invalid device" });
+    }
+  });
+
+  // DELETE: Reset all devices to off state
+  app.delete("/api/devices", (req, res) => {
+    controlFan(false);
+    controlLight(false);
+    controlPump(false);
+
+    res.json({
+      message: "All devices reset to off state",
+      fanState,
+      lightState,
+      pumpState
+    });
+  });
+
+  // --- END OF API ROUTES ---
+});
+
+// Start server
 app.listen(PORT, () => {
   console.log(`API server running on http://localhost:${PORT}`);
-  //requestOutputs();
 });
