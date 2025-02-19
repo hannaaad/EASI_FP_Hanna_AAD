@@ -1,8 +1,9 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const Gpio = require('onoff').Gpio;
+const gpio = require('rpi-gpio');
 const sensor = require('node-dht-sensor');
-const cors = require('cors');  // Import CORS
+const cors = require('cors');
+const mysql = require('mysql2');
 
 // Initialize Express app
 const app = express();
@@ -12,17 +13,42 @@ const port = 3001;
 app.use(bodyParser.json());
 app.use(cors());
 
-// Initialize GPIO pins
-const photosensorPin = new Gpio(17, 'in'); // Example GPIO pin for photosensor
-const DHT_PIN = 4; // Example GPIO pin for DHT11 sensor
-const fanPin = new Gpio(18, 'out'); // Example GPIO pin for fan
-const ledPin = new Gpio(27, 'out'); // Example GPIO pin for LEDs
-const irSensorPin = new Gpio(22, 'in'); // Example GPIO pin for IR sensor
-const waterDispenserPin = new Gpio(23, 'out'); // Example GPIO pin for water dispenser
+// GPIO pin numbers (using BCM numbering)
+const PINS = {
+    PHOTOSENSOR: 17,
+    FAN: 18,
+    LED: 27,
+    IR_SENSOR: 22,
+    WATER_DISPENSER: 23
+};
 
-// Temperature threshold for fan control
-const TEMPERATURE_THRESHOLD = 27; // Example threshold in °C
-const mysql = require('mysql2');
+// Setup GPIO pins
+const setupPins = async () => {
+    try {
+        // Set GPIO to use BCM pin numbering
+        gpio.setMode(gpio.MODE_BCM);
+        
+        // Setup input pins
+        await gpio.promise.setup(PINS.PHOTOSENSOR, gpio.DIR_IN);
+        await gpio.promise.setup(PINS.IR_SENSOR, gpio.DIR_IN);
+        
+        // Setup output pins
+        await gpio.promise.setup(PINS.FAN, gpio.DIR_OUT);
+        await gpio.promise.setup(PINS.LED, gpio.DIR_OUT);
+        await gpio.promise.setup(PINS.WATER_DISPENSER, gpio.DIR_OUT);
+        
+        console.log('GPIO pins initialized successfully');
+    } catch (error) {
+        console.error('Error setting up GPIO pins:', error);
+        process.exit(1);
+    }
+};
+
+// Initialize pins
+setupPins();
+
+const DHT_PIN = 4;
+const TEMPERATURE_THRESHOLD = 27;
 
 // Create MySQL connection
 const db = mysql.createConnection({
@@ -50,116 +76,95 @@ db.query(`CREATE TABLE IF NOT EXISTS sensor_data (
     fire_detected INT,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )`, (err) => {
-    if (err) {
-        console.error('Error creating table:', err.message);
-    }
+    if (err) console.error('Error creating table:', err.message);
 });
 
-// Function to read humidity and temperature using DHT11
+// Read sensors
 const readHumidityAndTemp = () => {
     return new Promise((resolve, reject) => {
-        const DHT_TYPE = 11; // DHT11 sensor type
-        sensor.read(DHT_TYPE, DHT_PIN, (err, temperature, humidity) => {
+        sensor.read(11, DHT_PIN, (err, temperature, humidity) => {
             if (err) {
-                console.log('Error reading humidity and temperature: ' + err);
-                reject('Error reading humidity and temperature: ' + err);
+                console.error('Error reading DHT sensor:', err);
+                resolve({ temperature: null, humidity: null });
             } else {
-                console.log(`Temperature: ${temperature}°C, Humidity: ${humidity}%`);
                 resolve({ temperature, humidity });
             }
         });
     });
 };
 
-// Function to read photosensitive sensor value (digital mode)
 const readPhotosensorValue = () => {
-    return new Promise((resolve, reject) => {
-        photosensorPin.read((err, value) => {
-            if (err) {
-                reject('Error reading photo sensor value: ' + err);
-            } else {
-                console.log(`Photo Sensor Value: ${value}`);
-                resolve(value);
-            }
-        });
-    });
+    return gpio.promise.read(PINS.PHOTOSENSOR);
 };
 
-// Function to read IR sensor value (digital mode)
 const readIRSensorValue = () => {
-    return new Promise((resolve, reject) => {
-        irSensorPin.read((err, value) => {
-            if (err) {
-                reject('Error reading IR sensor value: ' + err);
-            } else {
-                console.log(`IR Sensor Value: ${value}`);
-                resolve(value);
-            }
-        });
-    });
+    return gpio.promise.read(PINS.IR_SENSOR);
 };
 
-// Function to control fan based on temperature
-const controlFan = (temperature) => {
-    if (temperature > TEMPERATURE_THRESHOLD) {
-        fanPin.writeSync(1); // Turn on fan
-        console.log('Fan turned ON');
-    } else {
-        fanPin.writeSync(0); // Turn off fan
-        console.log('Fan turned OFF');
+// Control functions
+const controlFan = async (temperature) => {
+    try {
+        const state = temperature > TEMPERATURE_THRESHOLD;
+        await gpio.promise.write(PINS.FAN, state);
+        console.log(`Fan turned ${state ? 'ON' : 'OFF'}`);
+    } catch (error) {
+        console.error('Error controlling fan:', error);
     }
 };
 
-// Function to control LEDs based on photosensor
-const controlLEDs = (lightLevel) => {
-    if (lightLevel === 1) { // Assuming 1 means light is detected
-        ledPin.writeSync(0); // Turn off LEDs
-        console.log('LEDs turned OFF');
-    } else {
-        ledPin.writeSync(1); // Turn on LEDs
-        console.log('LEDs turned ON');
+const controlLEDs = async (lightLevel) => {
+    try {
+        const state = !lightLevel; // Turn on LEDs when dark
+        await gpio.promise.write(PINS.LED, state);
+        console.log(`LEDs turned ${state ? 'ON' : 'OFF'}`);
+    } catch (error) {
+        console.error('Error controlling LEDs:', error);
     }
 };
 
-// Function to control water dispenser based on IR sensor
-const controlWaterDispenser = (fireDetected) => {
-    if (fireDetected === 1) { // Assuming 1 means fire is detected
-        waterDispenserPin.writeSync(1); // Turn on water dispenser
-        console.log('Water dispenser turned ON');
-    } else {
-        waterDispenserPin.writeSync(0); // Turn off water dispenser
-        console.log('Water dispenser turned OFF');
+const controlWaterDispenser = async (fireDetected) => {
+    try {
+        await gpio.promise.write(PINS.WATER_DISPENSER, fireDetected);
+        console.log(`Water dispenser turned ${fireDetected ? 'ON' : 'OFF'}`);
+    } catch (error) {
+        console.error('Error controlling water dispenser:', error);
     }
 };
 
-// Endpoint to get sensor data and control actuators
+// Endpoint to get sensor data
 app.get('/sensor-data', async (req, res) => {
     try {
         const { temperature, humidity } = await readHumidityAndTemp();
         const lightLevel = await readPhotosensorValue();
         const fireDetected = await readIRSensorValue();
 
-        // Control fan, LEDs, and water dispenser based on sensor readings
-        controlFan(temperature);
-        controlLEDs(lightLevel);
-        controlWaterDispenser(fireDetected);
+        // Control actuators if sensor readings are valid
+        if (temperature !== null) await controlFan(temperature);
+        if (lightLevel !== null) await controlLEDs(lightLevel);
+        if (fireDetected !== null) await controlWaterDispenser(fireDetected);
 
-        db.query(
-          `INSERT INTO sensor_data (temperature, humidity, light_level, fire_detected) VALUES (?, ?, ?, ?)`,
-          [temperature, humidity, lightLevel, fireDetected],
-          (err, results) => {
-              if (err) {
-                  console.error('Error saving sensor data:', err.message);
-              } else {
-                  console.log(`Sensor data saved with ID ${results.insertId}`);
-              }
-          }
-      );
-      
+        // Save to database if readings are valid
+        if (temperature !== null && humidity !== null && lightLevel !== null && fireDetected !== null) {
+            db.query(
+                `INSERT INTO sensor_data (temperature, humidity, light_level, fire_detected) 
+                 VALUES (?, ?, ?, ?)`,
+                [temperature, humidity, lightLevel ? 1 : 0, fireDetected ? 1 : 0],
+                (err) => {
+                    if (err) console.error('Error saving sensor data:', err.message);
+                }
+            );
+        }
 
-        res.json({ temperature, humidity, lightLevel, fireDetected });
+        res.json({
+            temperature,
+            humidity,
+            lightLevel: lightLevel ? 1 : 0,
+            fireDetected: fireDetected ? 1 : 0,
+            timestamp: new Date()
+        });
     } catch (error) {
-        res.status(500).json({ error: error.toString() });
+        console.error('Error in /sensor-data endpoint:', error);
+        res.status(500).json({ error: 'Internal server error', details: error.message });
     }
 });
 
@@ -168,12 +173,11 @@ app.listen(port, () => {
     console.log(`Server running on port ${port}`);
 });
 
-// Cleanup GPIO on exit
+// Cleanup on exit
 process.on('SIGINT', () => {
-    photosensorPin.unexport();
-    fanPin.unexport();
-    ledPin.unexport();
-    irSensorPin.unexport();
-    waterDispenserPin.unexport();
-    process.exit();
+    console.log('Cleaning up...');
+    gpio.destroy(() => {
+        console.log('GPIO pins cleaned up');
+        process.exit();
+    });
 });
