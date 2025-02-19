@@ -1,140 +1,179 @@
-const express = require("express");
-const { Board } = require("johnny-five");
-const Raspi = require("raspi-io").RaspiIO;
-const dhtSensor = require("node-dht-sensor").promises;
-const Gpio = require("onoff").Gpio;
+const express = require('express');
+const bodyParser = require('body-parser');
+const Gpio = require('onoff').Gpio;
+const sensor = require('node-dht-sensor');
+const cors = require('cors');  // Import CORS
 
+// Initialize Express app
 const app = express();
-const PORT = 3000;
+const port = 3001;
 
-app.use(express.json()); // Middleware to parse JSON request bodies
+// Middleware
+app.use(bodyParser.json());
+app.use(cors());
 
-let fanState = false;
-let lightState = false;
-let pumpState = false;
-const TEMPERATURE_THRESHOLD = 25;
-const TEMPERATURE_LOW_THRESHOLD = 22;
-const LIGHT_THRESHOLD = 2;
+// Initialize GPIO pins
+const photosensorPin = new Gpio(17, 'in'); // Example GPIO pin for photosensor
+const DHT_PIN = 4; // Example GPIO pin for DHT11 sensor
+const fanPin = new Gpio(18, 'out'); // Example GPIO pin for fan
+const ledPin = new Gpio(27, 'out'); // Example GPIO pin for LEDs
+const irSensorPin = new Gpio(22, 'in'); // Example GPIO pin for IR sensor
+const waterDispenserPin = new Gpio(23, 'out'); // Example GPIO pin for water dispenser
 
-const board = new Board({
-  io: new Raspi()
+// Temperature threshold for fan control
+const TEMPERATURE_THRESHOLD = 27; // Example threshold in °C
+const mysql = require('mysql2');
+
+// Create MySQL connection
+const db = mysql.createConnection({
+    host: 'localhost',
+    user: 'your_username',
+    password: 'your_password',
+    database: 'sensorDataDB'
 });
 
-board.on("ready", () => {
-  const ledLight = new Gpio(3, "out");
-  const fan = new Gpio(9, "out"); // L293D driver for fan
-  const pump = new Gpio(11, "out"); // L293D driver for pump
-  const lightDetector = new Gpio(27, "in", "both"); // GPIO 27 for Light Detection
-  const irFlameSensor = new Gpio(17, "in", "both"); // IR Flame Sensor
-
-  console.log("System Ready.");
-
-  async function readTemperatureHumidity() {
-    try {
-      const { temperature, humidity } = await dhtSensor.read(11, 4);
-      console.log(`Temperature: ${temperature} °C, Humidity: ${humidity} %`);
-      return { temperature, humidity };
-    } catch (error) {
-      console.error("Failed to read from DHT sensor:", error);
-      return { temperature: null, humidity: null };
-    }
-  }
-
-  function controlFan(state) {
-    fan.writeSync(state ? 1 : 0);
-    fanState = state;
-    console.log(`Fan ${state ? "ON" : "OFF"}`);
-  }
-
-  function controlLight(state) {
-    ledLight.writeSync(state ? 1 : 0);
-    lightState = state;
-    console.log(`Light ${state ? "ON" : "OFF"}`);
-  }
-
-  function controlPump(state) {
-    pump.writeSync(state ? 1 : 0);
-    pumpState = state;
-    console.log(`Pump ${state ? "ON" : "OFF"}`);
-  }
-
-  irFlameSensor.watch((err, value) => {
+// Connect to MySQL
+db.connect(err => {
     if (err) {
-      console.error("Error reading IR Flame Sensor:", err);
-      return;
-    }
-    console.log(value ? "No Flame Detected" : "Flame Detected");
-  });
-
-  // --- API ROUTES ---
-
-  // GET: Retrieve sensor states and readings
-  app.get("/api/sensors", async (req, res) => {
-    const { temperature, humidity } = await readTemperatureHumidity();
-    const lightValue = 3; // Placeholder for light detection
-
-    res.json({
-      temperature,
-      humidity,
-      lightValue,
-      fanState,
-      lightState,
-      pumpState
-    });
-  });
-
-  // POST: Control pump manually
-  app.post("/api/pump", (req, res) => {
-    const { state } = req.body;
-    controlPump(state);
-    res.json({ pumpState });
-  });
-
-  // PUT: Set fan and light states
-  app.put("/api/devices", (req, res) => {
-    const { fan, light } = req.body;
-
-    if (fan !== undefined) controlFan(fan);
-    if (light !== undefined) controlLight(light);
-
-    res.json({ fanState, lightState });
-  });
-
-  // PATCH: Adjust fan or light state (toggle-like behavior)
-  app.patch("/api/devices/:device", (req, res) => {
-    const { device } = req.params;
-
-    if (device === "fan") {
-      fanState = !fanState;
-      controlFan(fanState);
-      res.json({ fanState });
-    } else if (device === "light") {
-      lightState = !lightState;
-      controlLight(lightState);
-      res.json({ lightState });
+        console.error('Error connecting to MySQL:', err.message);
     } else {
-      res.status(400).json({ error: "Invalid device" });
+        console.log('Connected to MySQL database.');
     }
-  });
-
-  // DELETE: Reset all devices to off state
-  app.delete("/api/devices", (req, res) => {
-    controlFan(false);
-    controlLight(false);
-    controlPump(false);
-
-    res.json({
-      message: "All devices reset to off state",
-      fanState,
-      lightState,
-      pumpState
-    });
-  });
-
-  // --- END OF API ROUTES ---
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`API server running on http://localhost:${PORT}`);
+// Create table if it doesn't exist
+db.query(`CREATE TABLE IF NOT EXISTS sensor_data (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    temperature FLOAT,
+    humidity FLOAT,
+    light_level INT,
+    fire_detected INT,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`, (err) => {
+    if (err) {
+        console.error('Error creating table:', err.message);
+    }
+});
+
+// Function to read humidity and temperature using DHT11
+const readHumidityAndTemp = () => {
+    return new Promise((resolve, reject) => {
+        const DHT_TYPE = 11; // DHT11 sensor type
+        sensor.read(DHT_TYPE, DHT_PIN, (err, temperature, humidity) => {
+            if (err) {
+                console.log('Error reading humidity and temperature: ' + err);
+                reject('Error reading humidity and temperature: ' + err);
+            } else {
+                console.log(`Temperature: ${temperature}°C, Humidity: ${humidity}%`);
+                resolve({ temperature, humidity });
+            }
+        });
+    });
+};
+
+// Function to read photosensitive sensor value (digital mode)
+const readPhotosensorValue = () => {
+    return new Promise((resolve, reject) => {
+        photosensorPin.read((err, value) => {
+            if (err) {
+                reject('Error reading photo sensor value: ' + err);
+            } else {
+                console.log(`Photo Sensor Value: ${value}`);
+                resolve(value);
+            }
+        });
+    });
+};
+
+// Function to read IR sensor value (digital mode)
+const readIRSensorValue = () => {
+    return new Promise((resolve, reject) => {
+        irSensorPin.read((err, value) => {
+            if (err) {
+                reject('Error reading IR sensor value: ' + err);
+            } else {
+                console.log(`IR Sensor Value: ${value}`);
+                resolve(value);
+            }
+        });
+    });
+};
+
+// Function to control fan based on temperature
+const controlFan = (temperature) => {
+    if (temperature > TEMPERATURE_THRESHOLD) {
+        fanPin.writeSync(1); // Turn on fan
+        console.log('Fan turned ON');
+    } else {
+        fanPin.writeSync(0); // Turn off fan
+        console.log('Fan turned OFF');
+    }
+};
+
+// Function to control LEDs based on photosensor
+const controlLEDs = (lightLevel) => {
+    if (lightLevel === 1) { // Assuming 1 means light is detected
+        ledPin.writeSync(0); // Turn off LEDs
+        console.log('LEDs turned OFF');
+    } else {
+        ledPin.writeSync(1); // Turn on LEDs
+        console.log('LEDs turned ON');
+    }
+};
+
+// Function to control water dispenser based on IR sensor
+const controlWaterDispenser = (fireDetected) => {
+    if (fireDetected === 1) { // Assuming 1 means fire is detected
+        waterDispenserPin.writeSync(1); // Turn on water dispenser
+        console.log('Water dispenser turned ON');
+    } else {
+        waterDispenserPin.writeSync(0); // Turn off water dispenser
+        console.log('Water dispenser turned OFF');
+    }
+};
+
+// Endpoint to get sensor data and control actuators
+app.get('/sensor-data', async (req, res) => {
+    try {
+        const { temperature, humidity } = await readHumidityAndTemp();
+        const lightLevel = await readPhotosensorValue();
+        const fireDetected = await readIRSensorValue();
+
+        // Control fan, LEDs, and water dispenser based on sensor readings
+        controlFan(temperature);
+        controlLEDs(lightLevel);
+        controlWaterDispenser(fireDetected);
+
+        db.query(
+          `INSERT INTO sensor_data (temperature, humidity, light_level, fire_detected) VALUES (?, ?, ?, ?)`,
+          [temperature, humidity, lightLevel, fireDetected],
+          (err, results) => {
+              if (err) {
+                  console.error('Error saving sensor data:', err.message);
+              } else {
+                  console.log(`Sensor data saved with ID ${results.insertId}`);
+              }
+          }
+      );
+      
+
+        res.json({ temperature, humidity, lightLevel, fireDetected });
+    } catch (error) {
+        res.status(500).json({ error: error.toString() });
+    }
+});
+
+// Start the server
+app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
+});
+
+// Cleanup GPIO on exit
+process.on('SIGINT', () => {
+    photosensorPin.unexport();
+    fanPin.unexport();
+    ledPin.unexport();
+    irSensorPin.unexport();
+    waterDispenserPin.unexport();
+    process.exit();
 });
