@@ -22,5 +22,12 @@
     "rpi-gpio": "^2.1.7",
     "sqlite3": "^5.1.7"
   },
-  "description": ""
+  "description": "",
+  "devDependencies": {
+    "@types/body-parser": "^1.19.5",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node-dht-sensor": "^0.4.2",
+    "@types/rpi-gpio": "^2.1.4"
+  }
 }
