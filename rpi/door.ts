@@ -1,7 +1,6 @@
 import { Gpio } from 'onoff';
-import { Mfrc522 } from 'mfrc522-rpi';
-import { Keypad } from 'rpi-keypad';
-import { Servo } from 'rpi-softpwm'; // Library for controlling servo motors
+import { Gpio as PigpioGpio } from 'pigpio'; // Use pigpio for PWM servo control
+const Mfrc522 = require('mfrc522-rpi'); // RFID library
 
 // RFID constants
 const SS_PIN = 8; // GPIO 8 (SPI0 CE0)
@@ -11,10 +10,6 @@ const RST_PIN = 25; // GPIO 25 for RST
 const LED_G = 16; // GPIO 16 for Green LED
 const LED_R = 20; // GPIO 20 for Red LED
 const BUZZER = 21; // GPIO 21 for Buzzer
-
-// Servo constants
-const SERVO_PIN = 12; // GPIO 12 (PWM0)
-const servo = new Servo(SERVO_PIN); // Initialize servo
 
 const mfrc522 = new Mfrc522(SS_PIN, RST_PIN);
 let personEntered = false;
@@ -30,8 +25,19 @@ const hexaKeys = [
   ['*', '0', '#', 'D']
 ];
 
-const rowPins = [17, 27, 22 , 5]; // GPIO pins for rows
-const colPins = [6, 13, 19 ,26 ]; // GPIO pins for columns
+const rowPins = [17, 27, 22, 5]; // GPIO pins for rows
+const colPins = [6, 13, 19, 26]; // GPIO pins for columns
+
+// Mock Keypad implementation (replace with actual keypad library if available)
+class Keypad {
+  constructor(private rowPins: number[], private colPins: number[], private keys: string[][]) {}
+
+  getKey(): string | null {
+    // Mock implementation: Replace with actual keypad logic
+    return null;
+  }
+}
+
 const keypad = new Keypad(rowPins, colPins, hexaKeys);
 
 let enteredPasscode = ""; // Store entered passcode
@@ -41,15 +47,18 @@ const greenLed = new Gpio(LED_G, 'out');
 const redLed = new Gpio(LED_R, 'out');
 const buzzer = new Gpio(BUZZER, 'out');
 
-// Servo control functions
+// Servo control
+const SERVO_PIN = 12;
+const servo = new PigpioGpio(SERVO_PIN, { mode: PigpioGpio.OUTPUT });
+
 function openDoor() {
   console.log("Door opened");
-  servo.setAngle(90); // Rotate servo to 90 degrees (open position)
+  servo.servoWrite(1500); // 1500 µs pulse width for 90 degrees
 }
 
 function closeDoor() {
   console.log("Door closed");
-  servo.setAngle(0); // Rotate servo to 0 degrees (closed position)
+  servo.servoWrite(1000); // 1000 µs pulse width for 0 degrees
 }
 
 function checkRFID() {
