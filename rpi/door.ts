@@ -1,14 +1,20 @@
 import { Gpio } from 'onoff';
 import { Mfrc522 } from 'mfrc522-rpi';
-import { PIGPIO } from 'pigpio';
 import { Keypad } from 'rpi-keypad';
+import { Servo } from 'rpi-softpwm'; // Library for controlling servo motors
 
 // RFID constants
-const SS_PIN = 24; // GPIO pin for SS (Slave Select)
-const RST_PIN = 25; // GPIO pin for RST (Reset)
-const LED_G = 18; // Green LED pin (GPIO 18)
-const LED_R = 23; // Red LED pin (GPIO 23)
-const BUZZER = 24; // Buzzer pin (GPIO 24)
+const SS_PIN = 8; // GPIO 8 (SPI0 CE0)
+const RST_PIN = 25; // GPIO 25 for RST
+
+// LED & Buzzer constants
+const LED_G = 16; // GPIO 16 for Green LED
+const LED_R = 20; // GPIO 20 for Red LED
+const BUZZER = 21; // GPIO 21 for Buzzer
+
+// Servo constants
+const SERVO_PIN = 12; // GPIO 12 (PWM0)
+const servo = new Servo(SERVO_PIN); // Initialize servo
 
 const mfrc522 = new Mfrc522(SS_PIN, RST_PIN);
 let personEntered = false;
@@ -23,8 +29,9 @@ const hexaKeys = [
   ['7', '8', '9', 'C'],
   ['*', '0', '#', 'D']
 ];
-const rowPins = [17, 27, 22, 5]; // GPIO pins for rows
-const colPins = [6, 13, 19, 26]; // GPIO pins for columns
+
+const rowPins = [17, 27, 22 , 5]; // GPIO pins for rows
+const colPins = [6, 13, 19 ,26 ]; // GPIO pins for columns
 const keypad = new Keypad(rowPins, colPins, hexaKeys);
 
 let enteredPasscode = ""; // Store entered passcode
@@ -34,14 +41,15 @@ const greenLed = new Gpio(LED_G, 'out');
 const redLed = new Gpio(LED_R, 'out');
 const buzzer = new Gpio(BUZZER, 'out');
 
+// Servo control functions
 function openDoor() {
   console.log("Door opened");
-  // Implement door opening mechanism if needed
+  servo.setAngle(90); // Rotate servo to 90 degrees (open position)
 }
 
 function closeDoor() {
   console.log("Door closed");
-  // Implement door closing mechanism if needed
+  servo.setAngle(0); // Rotate servo to 0 degrees (closed position)
 }
 
 function checkRFID() {
@@ -87,7 +95,7 @@ function checkKeypad() {
           greenLed.writeSync(0);
         }, 300);
         personEntered = true;
-        closeDoor();
+        setTimeout(closeDoor, 5000); // Close door after 5 seconds
       } else {
         console.log("Wrong passcode. Please reenter:");
         redLed.writeSync(1);
@@ -113,18 +121,18 @@ function mainLoop() {
   checkKeypad();
 
   if (adminEntered) {
-    console.log("admin entered");
+    console.log("Admin entered");
     openDoor();
     setTimeout(() => {
       closeDoor();
       adminEntered = false;
-      console.log("admin out");
+      console.log("Admin out");
     }, 5000);
   } else if (personEntered) {
-    console.log("person entered");
+    console.log("Person entered");
     setTimeout(() => {
       openDoor();
-      console.log("person out");
+      console.log("Person out");
       personEntered = false;
     }, 40000);
   }
