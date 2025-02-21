@@ -1,1 +1,4 @@
 /.idea/
+.d.ts
+node_modules/
+dist/
