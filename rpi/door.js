@@ -2,7 +2,11 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 var onoff_1 = require("onoff");
 var pigpio_1 = require("pigpio"); // Use pigpio for PWM servo control
-var Mfrc522 = require('mfrc522-rpi'); // RFID library
+var spi = require('spi-device');
+var Mfrc522 = require('mfrc522-rpi');
+// Open SPI device 0, chip select 0 (CE0)
+var spiDevice = spi.openSync(0, 0);
+var mfrc522 = new Mfrc522(spiDevice);
 // RFID constants
 var SS_PIN = 8; // GPIO 8 (SPI0 CE0)
 var RST_PIN = 25; // GPIO 25 for RST
@@ -10,7 +14,6 @@ var RST_PIN = 25; // GPIO 25 for RST
 var LED_G = 16; // GPIO 16 for Green LED
 var LED_R = 20; // GPIO 20 for Red LED
 var BUZZER = 21; // GPIO 21 for Buzzer
-var mfrc522 = new Mfrc522(); // Initialize RFID module
 var personEntered = false;
 var adminEntered = false;
 // Keypad constants

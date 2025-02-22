@@ -1,8 +1,7 @@
 import { Gpio } from 'onoff';
-import { Gpio as PigpioGpio } from 'pigpio'; // Use pigpio for PWM servo control
-const Mfrc522 = require('mfrc522-rpi'); // RFID library
+const Mfrc522 = require('mfrc522-rpi'); // RFID library (internally uses SPI)
 
-// RFID Module
+// Initialize RFID reader
 const mfrc522 = new Mfrc522(); // No need to pass SPI manually
 
 console.log("📡 RFID Scanner Initialized. Bring a card close to scan.");
