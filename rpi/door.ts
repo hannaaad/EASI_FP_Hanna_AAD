@@ -1,6 +1,7 @@
 import { Gpio } from 'onoff';
 import { Gpio as PigpioGpio } from 'pigpio'; // Use pigpio for PWM servo control
 const Mfrc522 = require('mfrc522-rpi'); // RFID library
+import * as spi from 'spi-device'; // Import spi-device for SPI communication
 
 // RFID constants
 const SS_PIN = 8; // GPIO 8 (SPI0 CE0)
@@ -10,7 +11,7 @@ const RST_PIN = 25; // GPIO 25 for RST
 const LED_G = 16; // GPIO 16 for Green LED
 const LED_R = 20; // GPIO 20 for Red LED
 const BUZZER = 21; // GPIO 21 for Buzzer
-
+const spiDevice = spi.openSync(0, 0); // SPI bus 0, device 0 (CE0)
 const mfrc522 = new Mfrc522(SS_PIN, RST_PIN);
 let personEntered = false;
 let adminEntered = false;
@@ -63,8 +64,10 @@ function closeDoor() {
 
 function checkRFID() {
   if (mfrc522.isNewCardPresent() && mfrc522.readCardSerial()) {
-    const uid = mfrc522.getUid();
-    console.log(`UID tag: ${uid}`);
+    const uidData = mfrc522.getUid();
+    const uid = uidData.uidBytes.map((byte: number) => byte.toString(16).toUpperCase()).join(" ");
+
+    console.log(`UID tag: ${uid}`); // Display the scanned card's UID in output
 
     if (uid === "A1 3D F0 1D") { // Authorized UID
       console.log("Authorized access by RFID");
