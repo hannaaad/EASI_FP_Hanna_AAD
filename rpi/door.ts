@@ -1,7 +1,11 @@
 import { Gpio } from 'onoff';
 import { Gpio as PigpioGpio } from 'pigpio'; // Use pigpio for PWM servo control
-const Mfrc522 = require('mfrc522-rpi'); // RFID library
-import * as spi from 'spi-device'; // Import spi-device for SPI communication
+const spi = require('spi-device'); 
+const Mfrc522 = require('mfrc522-rpi');
+
+// Open SPI device 0, chip select 0 (CE0)
+const spiDevice = spi.openSync(0, 0);
+const mfrc522 = new Mfrc522(spiDevice); 
 
 // RFID constants
 const SS_PIN = 8; // GPIO 8 (SPI0 CE0)
@@ -11,8 +15,7 @@ const RST_PIN = 25; // GPIO 25 for RST
 const LED_G = 16; // GPIO 16 for Green LED
 const LED_R = 20; // GPIO 20 for Red LED
 const BUZZER = 21; // GPIO 21 for Buzzer
-const spiDevice = spi.openSync(0, 0); // SPI bus 0, device 0 (CE0)
-const mfrc522 = new Mfrc522(SS_PIN, RST_PIN);
+
 let personEntered = false;
 let adminEntered = false;
 
@@ -31,9 +34,16 @@ const colPins = [6, 13, 19, 26]; // GPIO pins for columns
 
 // Mock Keypad implementation (replace with actual keypad library if available)
 class Keypad {
-  constructor(private rowPins: number[], private colPins: number[], private keys: string[][]) {}
+  rowPins: number[];
+  colPins: number[];
+  keys: string[][];
+  constructor(rowPins: number[], colPins: number[], keys: string[][]) {
+    this.rowPins = rowPins;
+    this.colPins = colPins;
+    this.keys = keys;
+  }
 
-  getKey(): string | null {
+  getKey() {
     // Mock implementation: Replace with actual keypad logic
     return null;
   }
@@ -53,41 +63,42 @@ const SERVO_PIN = 12;
 const servo = new PigpioGpio(SERVO_PIN, { mode: PigpioGpio.OUTPUT });
 
 function openDoor() {
-  console.log("Door opened");
+  console.log("🚪 Door opened");
   servo.servoWrite(1500); // 1500 µs pulse width for 90 degrees
 }
 
 function closeDoor() {
-  console.log("Door closed");
+  console.log("🚪 Door closed");
   servo.servoWrite(1000); // 1000 µs pulse width for 0 degrees
 }
 
 function checkRFID() {
-  if (mfrc522.isNewCardPresent() && mfrc522.readCardSerial()) {
-    const uidData = mfrc522.getUid();
-    const uid = uidData.uidBytes.map((byte: number) => byte.toString(16).toUpperCase()).join(" ");
+  if (!mfrc522.isNewCardPresent()) return; // Check for new card
 
-    console.log(`UID tag: ${uid}`); // Display the scanned card's UID in output
+  if (!mfrc522.readCardSerial()) return; // Read card UID
 
-    if (uid === "A1 3D F0 1D") { // Authorized UID
-      console.log("Authorized access by RFID");
-      adminEntered = true;
-      greenLed.writeSync(1);
-      buzzer.writeSync(1);
-      setTimeout(() => {
-        buzzer.writeSync(0);
-        greenLed.writeSync(0);
-      }, 300);
-      openDoor();
-    } else {
-      console.log("Access denied by RFID");
-      redLed.writeSync(1);
-      buzzer.writeSync(1);
-      setTimeout(() => {
-        buzzer.writeSync(0);
-        redLed.writeSync(0);
-      }, 1000);
-    }
+  const uid = mfrc522.uid.map(byte => byte.toString(16).toUpperCase()).join(" ");
+
+  console.log(`✅ RFID Card detected! UID: ${uid}`);
+
+  if (uid === "A1 3D F0 1D") { // Authorized UID
+    console.log("🔓 Authorized access by RFID");
+    adminEntered = true;
+    greenLed.writeSync(1);
+    buzzer.writeSync(1);
+    setTimeout(() => {
+      buzzer.writeSync(0);
+      greenLed.writeSync(0);
+    }, 300);
+    openDoor();
+  } else {
+    console.log("⛔ Access denied by RFID");
+    redLed.writeSync(1);
+    buzzer.writeSync(1);
+    setTimeout(() => {
+      buzzer.writeSync(0);
+      redLed.writeSync(0);
+    }, 1000);
   }
 }
 
@@ -98,7 +109,7 @@ function checkKeypad() {
   if (key) {
     if (key === 'D') {
       if (enteredPasscode === correctPasscode) {
-        console.log("Correct passcode entered.");
+        console.log("✅ Correct passcode entered.");
         greenLed.writeSync(1);
         buzzer.writeSync(1);
         openDoor();
@@ -107,9 +118,9 @@ function checkKeypad() {
           greenLed.writeSync(0);
         }, 300);
         personEntered = true;
-        setTimeout(closeDoor, 5000); // Close door after 5 seconds
+        setTimeout(closeDoor, 5000);
       } else {
-        console.log("Wrong passcode. Please reenter:");
+        console.log("❌ Wrong passcode. Please reenter:");
         redLed.writeSync(1);
         buzzer.writeSync(1);
         setTimeout(() => {
@@ -122,7 +133,7 @@ function checkKeypad() {
     } else {
       if (enteredPasscode.length < 8) {
         enteredPasscode += key;
-        console.log(`Entered passcode: ${enteredPasscode}`);
+        console.log(`⌨️ Entered passcode: ${enteredPasscode}`);
       }
     }
   }
@@ -133,23 +144,23 @@ function mainLoop() {
   checkKeypad();
 
   if (adminEntered) {
-    console.log("Admin entered");
+    console.log("👨‍💼 Admin entered");
     openDoor();
     setTimeout(() => {
       closeDoor();
       adminEntered = false;
-      console.log("Admin out");
+      console.log("👨‍💼 Admin out");
     }, 5000);
   } else if (personEntered) {
-    console.log("Person entered");
+    console.log("🚶 Person entered");
     setTimeout(() => {
       openDoor();
-      console.log("Person out");
+      console.log("🚶 Person out");
       personEntered = false;
     }, 40000);
   }
 
-  setTimeout(mainLoop, 100); // Run the loop every 100ms
+  setTimeout(mainLoop, 100); // Run every 100ms
 }
 
 // Initialize and start the main loop
